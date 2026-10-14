@@ -1,0 +1,18 @@
+{
+  "id": "./",
+  "name": "Тихий ритм — табулатуры для ханга",
+  "short_name": "Тихий ритм",
+  "description": "Создавайте табулатуры для ханга, слушайте ритм и сохраняйте изображения. Работает без интернета после первой загрузки.",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f6f0",
+  "theme_color": "#f7f6f0",
+  "categories": ["music", "productivity", "education"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

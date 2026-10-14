@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f6f0">
+  <meta name="description" content="Ваш ритм — всегда под рукой. Создавайте табулатуры для ханга, слушайте и сохраняйте их в картинки.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Тихий ритм — табулатуры с собой</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="app-icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="core.js"></script>
+  <script defer src="sample-tabs.js"></script>
+  <script defer src="playback.js"></script>
+  <script defer src="export.js"></script>
+  <script defer src="storage.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <svg class="svg-symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6M8 12h13"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m9 5 11 7-11 7Z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01" stroke-width="4"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V3m-4 4 4-4 4 4M5 11v9h14v-9"/></symbol>
+    <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M8 5 3 10l5 5M3 10h11a6 6 0 0 1 0 12"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="m16 5 5 5-5 5M21 10H10a6 6 0 0 0 0 12"/></symbol>
+    <symbol id="i-tune" viewBox="0 0 24 24"><path d="M4 7h6m4 0h6M4 17h12m4 0h0"/><circle cx="12" cy="7" r="2"/><circle cx="18" cy="17" r="2"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M15 8V3H3v13h5"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-loop" viewBox="0 0 24 24"><path d="m17 3 4 4-4 4M21 7H8a4 4 0 0 0-4 4m3 10-4-4 4-4M3 17h13a4 4 0 0 0 4-4"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13M9 9l11-2"/><ellipse cx="6" cy="18" rx="3" ry="2.5"/><ellipse cx="17" cy="16" rx="3" ry="2.5"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+  </defs></svg>
+  <div id="app" class="app-shell">
+    <section id="library-screen" class="screen library-screen" aria-label="Мои табулатуры">
+      <header class="library-header"><a class="brand" href="./"><img src="app-icon.svg" alt="" width="42" height="42"><span>тихий ритм<small>ТАБУЛАТУРЫ С СОБОЙ</small></span></a><button class="icon-button" data-action="help" aria-label="Помощь и установка">?</button></header>
+      <main>
+        <div class="library-intro"><p class="eyebrow">ДЛЯ МУЗЫКИ, КОТОРАЯ С ВАМИ</p><h1>У каждого дня<br>свой ритм<span>.</span></h1><p>Поймайте мелодию. Запишите по-своему.</p></div>
+        <button class="create-card" data-action="new"><span class="create-plus">＋</span><span><strong>Новая табулатура</strong><small>От первого удара до целой мелодии</small></span><svg class="icon"><use href="#i-next"/></svg></button>
+        <div class="library-tools"><h2>Моя библиотека <span id="library-count"></span></h2><button class="text-button" data-action="import"><svg class="icon"><use href="#i-import"/></svg>Открыть файл</button></div>
+        <label class="search-box"><svg class="icon"><use href="#i-search"/></svg><input id="search" type="search" placeholder="Найти свой ритм" aria-label="Поиск табулатур" autocomplete="off"></label>
+        <div id="library-list" class="library-list"><p class="muted">Открываем библиотеку…</p></div>
+        <div class="library-bottom"><span id="offline-status" class="connection-label">На этом устройстве</span><button class="text-button" data-action="backup">Резервная копия</button></div>
+        <div id="storage-error" class="notice error-notice" hidden></div>
+        <div id="install-tip" class="install-tip" hidden><span><strong>Ваш ритм — в одном касании</strong><small>Добавьте приложение на главный экран.</small></span><button class="text-button" data-action="install">Как добавить</button></div>
+      </main>
+      <footer class="library-footer">Место для музыки. Один удар за другим.</footer>
+    </section>
+    <section id="editor-screen" class="screen editor-screen" aria-label="Редактор табулатуры" hidden>
+      <header class="editor-header"><button class="icon-button" data-action="library" aria-label="В библиотеку"><svg class="icon"><use href="#i-back"/></svg></button><button class="document-heading" data-action="settings"><span id="editor-title">Табулатура</span><small id="save-status" role="status">Сохранено</small></button><button class="icon-button export-button" data-action="export" aria-label="Экспорт табулатуры"><svg class="icon"><use href="#i-export"/></svg></button></header>
+      <div class="editor-layout">
+        <main class="score-area">
+          <div class="document-meta"><button id="meter-chip" class="chip" data-action="settings">4/4</button><button id="tempo-chip" class="chip" data-action="play-settings">90 BPM</button><button id="hands-chip" class="chip" data-action="settings">Одна партия</button><button class="meta-more" data-action="settings" aria-label="Настройки произведения"><svg class="icon"><use href="#i-tune"/></svg></button></div>
+          <div class="score-toolbar"><div class="segmented"><button id="write-mode" data-action="write-mode" aria-pressed="true">Запись</button><button id="listen-mode" data-action="listen-mode" aria-pressed="false">Прослушивание</button></div><div class="undo-group"><button id="undo" class="icon-button" data-action="undo" aria-label="Отменить изменение"><svg class="icon"><use href="#i-undo"/></svg></button><button id="redo" class="icon-button" data-action="redo" aria-label="Повторить изменение"><svg class="icon"><use href="#i-redo"/></svg></button></div></div>
+          <nav id="measure-nav" class="measure-nav" aria-label="Выбор такта"></nav>
+          <article class="measure-card"><header class="measure-heading"><div><span class="eyebrow">ВАША ТАБУЛАТУРА</span><h1 id="measure-title">Такт 01</h1></div><div class="measure-actions"><button class="text-button" data-action="rhythm"><svg class="icon"><use href="#i-tune"/></svg>Ритм</button><button class="icon-button" data-action="measure-menu" aria-label="Действия с тактом"><svg class="icon"><use href="#i-more"/></svg></button></div></header><p id="measure-label" class="measure-caption" hidden></p><div id="grid-scroll" class="grid-scroll"><div id="score-grid" class="score-grid" role="group" aria-label="Ячейки табулатуры"></div></div><div class="measure-footer"><span id="rhythm-caption"></span><span class="scroll-hint">Листайте такт ↔</span></div></article>
+          <div class="measure-navigation"><button class="button secondary" data-action="previous-measure" id="previous-measure"><svg class="icon"><use href="#i-back"/></svg>Назад</button><button class="button secondary" data-action="duplicate-measure" aria-label="Повторить этот такт"><svg class="icon"><use href="#i-copy"/></svg>Повторить</button><button class="button secondary" data-action="next-measure" id="next-measure">Дальше<svg class="icon"><use href="#i-next"/></svg></button></div>
+          <button class="add-measure" data-action="add-measure"><svg class="icon"><use href="#i-plus"/></svg>Добавить такт</button>
+          <div class="score-note"><svg class="icon"><use href="#i-note"/></svg><span id="editor-hint">Коснитесь ячейки, затем выберите ноту внизу.</span></div>
+          <div id="phrase-example" class="phrase-example" hidden></div>
+        </main>
+        <aside id="entry-dock" class="entry-dock" aria-label="Ввод нот и прослушивание">
+          <div class="transport"><button id="play-button" class="play-button" data-action="play" aria-label="Прослушать"><svg class="icon"><use href="#i-play"/></svg></button><button class="transport-info" data-action="play-settings"><strong id="play-title">Слушать ритм</strong><small id="play-detail">Всё произведение · 90 BPM</small></button><button id="loop-button" class="icon-button" data-action="loop" aria-label="Повтор воспроизведения" aria-pressed="false"><svg class="icon"><use href="#i-loop"/></svg></button><button class="icon-button" data-action="play-settings" aria-label="Настройки прослушивания"><svg class="icon"><use href="#i-tune"/></svg></button></div>
+          <div id="entry-panel"><div class="entry-context"><span id="selection-context">Такт 1 · доля 1</span><label class="auto-option"><input id="auto-advance" type="checkbox" checked><span>Автопереход</span></label></div><div id="note-pad" class="note-pad" aria-label="Панель нот"></div><div class="entry-actions"><button class="button secondary" data-action="chord"><span class="chord-mark">≋</span>Аккорд</button><button class="button secondary" data-action="clear-cell" aria-label="Очистить ячейку">⌫ <span>Стереть</span></button><button class="icon-button" data-action="previous-cell" aria-label="Предыдущая ячейка">←</button><button class="icon-button" data-action="next-cell" aria-label="Следующая ячейка">→</button></div></div>
+        </aside>
+      </div>
+    </section>
+  </div>
+  <dialog id="sheet" class="sheet"><div class="sheet-grip" aria-hidden="true"></div><header class="sheet-header"><h2 id="sheet-title"></h2><button class="icon-button" data-action="close-sheet" aria-label="Закрыть"><svg class="icon"><use href="#i-close"/></svg></button></header><div id="sheet-body" class="sheet-body"></div></dialog>
+  <input id="import-file" type="file" accept=".json,.txt,application/json,text/plain" multiple hidden>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <noscript>Для редактора нужен включённый JavaScript.</noscript>
+</body>
+</html>
