@@ -1,0 +1,19 @@
+{
+  "appId": "com.hangcreator.mobile",
+  "appName": "Тихий ритм",
+  "webDir": "native-dist",
+  "backgroundColor": "#f7f6f0",
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#f7f6f0"
+  },
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#f7f6f0"
+  },
+  "plugins": {
+    "SystemBars": {
+      "style": "LIGHT"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+dist/
+native-dist/
+releases/
+*.jks
+*.keystore
+artifacts/
+node_modules/
+__pycache__/
+*.pyc
+*.tar.gz
+*.tgz
+.DS_Store
+.site-workflow*
