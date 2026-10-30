@@ -9,6 +9,8 @@
   const tokens = ['D','S','K','—',...Array.from({length:12}, (_, i) => String(i + 1))];
   const state = {tabs:[], id:null, measure:0, slot:0, row:'main', mode:'write', auto:true, marker:false, markerToken:'D', playing:false, playMeasure:false, loop:false, metronome:false, storageReady:false, histories:new Map(), saves:new Map()};
   let sheetType = '', toastTimer, rhythmDraft, chordDraft = [], exportFiles = [], exportGeneration = 0, exportIterator = null, installPrompt;
+  let pwaRegistration=null, updateAvailable=false, updateApplying=false, updateReloadRequested=false, updateTimer, lastUpdateCheck=0, updateCheckPromise=null, installedApp=false, pendingLibraryOps=0;
+  const updateCheckpointKey='quiet-rhythm-update-selection';
   const current = () => state.tabs.find(tab => tab.id === state.id);
   const history = () => { if (!state.histories.has(state.id)) state.histories.set(state.id, {undo:[],redo:[]}); return state.histories.get(state.id); };
   function toast(message, error = false) { clearTimeout(toastTimer); $('toast').textContent = message; $('toast').hidden = false; $('toast').classList.toggle('error-notice', error); toastTimer = setTimeout(() => {$('toast').hidden = true;}, error ? 6500 : 3000); }
@@ -32,11 +34,13 @@
   function persist(tab) {
     if (!state.storageReady) return;
     const marker = {pending:true}; state.saves.set(tab.id, marker); renderSave();
-    S.saveTab(tab).then(() => {if (state.saves.get(tab.id) === marker) state.saves.set(tab.id, {pending:false}); renderSave();}, error => {
+    marker.task=S.saveTab(tab);
+    marker.task.then(() => {if (state.saves.get(tab.id) === marker) state.saves.set(tab.id, {pending:false}); renderSave();}, error => {
       if (state.saves.get(tab.id) === marker) state.saves.set(tab.id, {error:true}); renderSave();
       $('storage-error').textContent = 'Не удалось сохранить изменения на устройстве. Скачайте резервную копию библиотеки. ' + error.message;
       $('storage-error').hidden = false; report(error);
     });
+    return marker.task;
   }
   function trimHistory(items) {let size = items.reduce((n, x) => n + x.length, 0); while (items.length > 40 || size > 5000000 && items.length > 1) size -= items.shift().length;}
   function commit(change, message) {
@@ -119,6 +123,7 @@
     $('selection-context').textContent=state.marker?`Маркер: ${state.markerToken==='-'?'ластик':state.markerToken}${state.row==='main'?'':' · '+state.row}`:`Такт ${state.measure+1} · ячейка ${state.slot+1}${state.row==='main'?'':' · '+state.row}`;
     $('cell-duration').textContent=durationText(slot)+' · размер '+tab.meter.numerator+'/'+tab.meter.denominator;
     $('merge-cell').disabled=!C.canMergeSlot(tab,state.measure,state.slot);
+    const capacity=splitCapacity();document.querySelectorAll('#cell-tools [data-action="split-cell"]').forEach(button=>button.disabled=Number(button.dataset.parts)>capacity);$('cell-tools').querySelector('[data-action="custom-split"]').disabled=capacity<2;
     $('cell-tools').hidden=state.mode==='listen';
     $('hand-picker').hidden=!both;
     $('cell-hands').textContent=both?'Без рук':'Добавить R/L';
@@ -138,11 +143,13 @@
   function moveCell(step) {const tab=current();const count=C.slots(tab,state.measure).length;state.slot+=step;if(state.slot>=count){if(state.measure<tab.measures.length-1){state.measure++;state.slot=0;}else state.slot=count-1;}if(state.slot<0){if(state.measure>0){state.measure--;state.slot=C.slots(tab,state.measure).length-1;}else state.slot=0;}renderNav();renderScore();const node=document.querySelector('.note-cell.selected');if(node)revealCell(node);}
   function enterNote(token) {if(state.mode!=='write')return;clampSelection();if(state.marker){state.markerToken=token;renderSelection();return;}commit(tab=>{tab.measures[state.measure].rows[state.row][state.slot]=C.parseToken(token);});if(state.auto)moveCell(1);else renderSelection();}
   function durationText(slot) {return slot.durationFraction;}
-  function editSlotRhythm(parts) {const result=parts?C.splitSlot(current(),state.measure,state.slot,parts):C.mergeSlot(current(),state.measure,state.slot);if(result.lost&&!confirm(`При соединении исчезнут ${result.lost} заполненных ячеек. Соединить? Изменение можно отменить.`))return;state.slot=result.slot;commit(()=>result.tab,parts?'Ячейка разделена. Размер такта сохранён.':'Части соединены');if(sheetType==='cell')cellSheet();}
+  function splitCapacity() {const slot=C.slots(current(),state.measure)[state.slot];return 65-C.measureBeats(current(),state.measure)[slot.beat].division;}
+  function editSlotRhythm(parts) {if(parts!==undefined&&(!Number.isInteger(parts)||parts<2||parts>splitCapacity()))throw Error('Укажите целое число частей от 2 до '+splitCapacity()+'. В одной доле помещается до 64 ячеек.');const result=parts!==undefined?C.splitSlot(current(),state.measure,state.slot,parts):C.mergeSlot(current(),state.measure,state.slot);if(result.lost&&!confirm(`При соединении исчезнут ${result.lost} заполненных ячеек. Соединить? Изменение можно отменить.`))return;state.slot=result.slot;commit(()=>result.tab,parts?'Ячейка разделена. Размер такта сохранён.':'Части соединены');if(sheetType==='cell')cellSheet();else if(sheetType==='split')closeSheet();}
+  function customSplitSheet() {clampSelection();const slot=C.slots(current(),state.measure)[state.slot],capacity=splitCapacity();openSheet('Разделить ячейку '+(slot.index+1),`<p class="sheet-help">Каждая новая часть займёт одинаковое время внутри ${durationText(slot)}. Размер такта и остальные удары сохранятся.</p><div class="division-choices split-presets">${[2,3,4,6,8].map(n=>`<button data-action="split-cell" data-parts="${n}" ${n>capacity?'disabled':''} aria-label="Разделить на ${n} равных частей">÷ ${n}</button>`).join('')}</div><form id="split-form" novalidate><label class="field">Своё число частей<input name="parts" type="number" inputmode="numeric" min="2" max="${capacity}" step="1" value="${Math.min(6,capacity)}" required autofocus aria-describedby="split-help"><small id="split-help">От 2 до ${capacity} для этой ячейки. В одной доле — до 64 ячеек.</small></label><button class="button primary full" type="submit" ${capacity<2?'disabled':''}>Разделить на равные части</button></form>`,'split');}
   function cellSheet() {
     clampSelection();const slot=C.slots(current(),state.measure)[state.slot],both=C.cellHands(current(),state.measure,state.slot)==='split';
     openSheet('Ячейка '+(slot.index+1)+' · '+durationText(slot),`<p class="sheet-help">Доля ${slot.beat+1}, счёт <b>${esc(slot.label)}</b>. Деление меняет только эту ячейку. Все остальные удары остаются на своих местах.</p>
-      <div class="cell-tools-buttons sheet-cell-tools"><button data-action="split-cell" data-parts="2">Разделить на 2</button><button data-action="split-cell" data-parts="3">На 3</button><button data-action="merge-cell" ${C.canMergeSlot(current(),state.measure,state.slot)?'':'disabled'}>Соединить</button></div>
+      <div class="cell-tools-buttons sheet-cell-tools">${[2,3,4].map(n=>`<button data-action="split-cell" data-parts="${n}" ${n>splitCapacity()?'disabled':''}>÷ ${n}</button>`).join('')}<button data-action="custom-split" ${splitCapacity()<2?'disabled':''}>Своё…</button><button data-action="merge-cell" ${C.canMergeSlot(current(),state.measure,state.slot)?'':'disabled'}>Соединить</button></div>
       <button class="button secondary full" data-action="cell-hands">${both?'Без рук · объединить ноты':'Добавить R/L в эту ячейку'}</button><p class="sheet-help">${both?'Обе руки находятся внутри одной ячейки. При объединении их ноты сохранятся аккордом.':'Текущий удар станет правой рукой. Остальные ячейки сохранят свой вид.'}</p>
       <form id="cell-syllable-form"><label class="field">Слог этой ячейки<input name="syllable" value="${esc(slot.syllable)}" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false"><small>Например: Ta → Da. Замена действует только здесь и видна в коннаколе и гибриде.</small></label><button class="button primary full" type="submit">Сохранить слог</button><button class="text-button full" type="button" data-action="reset-syllable">Вернуть автоматический слог</button></form><button class="text-button full" data-action="syllable-pattern">Настроить слоги всего произведения →</button>`,'cell');
   }
@@ -150,7 +157,7 @@
   function selectMeasure(index) {player.stop();state.measure=index;state.slot=0;clampSelection();renderEditor();}
   function addMeasure(copy=false) {if(current().measures.length>=512)throw Error('В одном произведении — до 512 тактов.');const index=state.measure;commit(tab=>{const m=C.clone(tab.measures[index]);m.id=C.uid();if(!copy){m.label='';for(const key of ['main','R','L'])m.rows[key]=m.rows[key].map(()=>[]);}tab.measures.splice(index+1,0,m);});state.measure=index+1;state.slot=0;renderEditor();toast(copy?'Такт повторён':'Новый такт готов');}
   function renderTransport() {const tab=current();$('play-button').innerHTML=icon(state.playing?'stop':'play');$('play-button').setAttribute('aria-label',state.playing?'Остановить':'Прослушать');$('play-title').textContent=state.playing?'Играет ваш ритм':'Слушать ритм';$('play-detail').textContent=(state.playMeasure?'Этот такт':'Всё произведение')+' · '+(tab?.tempo||90)+' BPM'+(state.metronome?' · метроном':'');$('loop-button').setAttribute('aria-pressed',state.loop);}
-  function updateDockSize() {if(!$('editor-screen').hidden){document.documentElement.style.setProperty('--dock-height',Math.ceil($('entry-dock').getBoundingClientRect().height)+'px');document.documentElement.style.setProperty('--editor-header-height',Math.ceil(document.querySelector('.editor-header').getBoundingClientRect().height)+'px');}}
+  function updateDockSize() {document.documentElement.style.setProperty('--update-height',$('app-update').hidden?'0px':Math.ceil($('app-update').getBoundingClientRect().height)+'px');if(!$('editor-screen').hidden){document.documentElement.style.setProperty('--dock-height',Math.ceil($('entry-dock').getBoundingClientRect().height)+'px');document.documentElement.style.setProperty('--editor-header-height',Math.ceil(document.querySelector('.editor-header').getBoundingClientRect().height)+'px');}}
   function openSheet(title,html,type) {player.stop();closeSheet();sheetType=type;$('sheet-title').textContent=title;$('sheet-body').innerHTML=html;$('sheet').showModal();$('sheet').scrollTop=0;const focus=$('sheet').querySelector('[autofocus]');if(focus)focus.focus();}
   function releaseExportFiles() {for(const item of exportFiles)URL.revokeObjectURL(item.url);exportFiles=[];}
   function cleanExport() {exportGeneration++;releaseExportFiles();if(exportIterator){exportIterator.return().catch(()=>{});exportIterator=null;}}
@@ -209,7 +216,7 @@
     finally{if(generation===exportGeneration){$('generate-png').disabled=false;$('generate-png').textContent='Подготовить заново';$('export-range').disabled=false;}}
   }
   function nativeHelpSheet() {
-    openSheet('Музыка без интернета',`<p>Всё необходимое уже внутри приложения. Создание и редактирование табулатур, прослушивание и экспорт работают без интернета — даже при первом запуске.</p><details open><summary>Сохранить картинку или табулатуру</summary><p>Откройте экспорт в редакторе → «Подготовить PNG» → «Сохранить PNG» и выберите папку на телефоне. «Поделиться» открывает список приложений для отправки. Для продолжения редактирования сохраняйте JSON.</p></details><details><summary>Где хранится музыка</summary><p>Изменения автоматически сохраняются на этом телефоне. «Резервная копия» сохраняет всю библиотеку отдельным файлом. Её можно открыть на другом телефоне через «Открыть файл».</p><p>Удаление приложения или очистка его данных удаляет локальную библиотеку. Сохраняйте резервные копии важных работ. Автоматической синхронизации между устройствами нет.</p></details>${recordingHelp()}<button class="button secondary full" data-action="backup">Сохранить резервную копию</button>`,'help');
+    openSheet('Музыка без интернета',`<p>Всё необходимое уже внутри приложения. Создание и редактирование табулатур, прослушивание и экспорт работают без интернета — даже при первом запуске.</p><details open><summary>Сохранить картинку или табулатуру</summary><p>Откройте экспорт в редакторе → «Подготовить PNG» → «Сохранить PNG» и выберите папку на телефоне. «Поделиться» открывает список приложений для отправки. Для продолжения редактирования сохраняйте JSON.</p></details><details><summary>Где хранится музыка</summary><p>Изменения автоматически сохраняются на этом телефоне. «Резервная копия» сохраняет всю библиотеку отдельным файлом. Её можно открыть на другом телефоне через «Открыть файл».</p><p>Удаление приложения или очистка его данных удаляет локальную библиотеку. Сохраняйте резервные копии важных работ. Автоматической синхронизации между устройствами нет.</p></details>${recordingHelp()}${pwaHelp()}<button class="button secondary full" data-action="backup">Сохранить резервную копию</button>`,'help');
   }
   async function importFiles(files) {
     const imported=[];
@@ -222,12 +229,12 @@
   }
   function recordingHelp() {return `<details><summary>Как записывать</summary>
     <p>Выберите ячейку и нажмите D, S, K или номер поля. «Аккорд» объединяет несколько нот выбранной руки. «Автопереход» переводит курсор дальше. «Маркер» позволяет выбрать ноту и рисовать касаниями ячеек; «—» работает как ластик.</p>
-    <p>÷ 2 и ÷ 3 дробят только выбранную ячейку, сохраняя размер и положение остальных ударов. «Соединить» возвращает части в одну ячейку. Длительность показана рядом с инструментами. Нажмите на счёт или «Слог…», чтобы заменить слог одной ячейки.</p>
+    <p>÷ 2, ÷ 3 и ÷ 4 дробят только выбранную ячейку. «Своё…» позволяет ввести другое число, например 6 или 8: части будут равными, размер и положение остальных ударов сохранятся. В одной доле — до 64 ячеек. «Соединить» возвращает части в одну ячейку. Длительность показана рядом с инструментами. Нажмите на счёт или «Слог…», чтобы заменить слог одной ячейки.</p>
     <p>«Цифры / Коннакол / Гибрид» меняют вид записи прямо над тактом. «Слоги…» открывает восемь полей исходного набора TaKaDiMi TaKaJoNu: например, первое Ta можно заменить на Pa. Отдельные замены в ячейках сохраняются.</p>
     <p>«Добавить R/L» включает руки только в выбранной ячейке: записанный удар переносится в R, остальные ячейки сохраняются. R — правая синяя рука, L — левая красная; обе отображаются внутри одной ячейки. Выберите руку на панели ввода. «Без рук» объединяет их ноты в обычный аккорд этой ячейки. При дроблении обе части наследуют её режим рук.</p>
     <p>«Цвет» переключает цветной и чёрно-белый вид, сохраняя обозначения R/L. Параметр «Партии» в настройках произведения меняет режим сразу для всех ячеек. Изменение других настроек сохраняет индивидуальный выбор рук.</p>
     <p>На компьютере: стрелки — перемещение, цифры и D/S/K — ввод, Delete — очистить, Ctrl/Cmd+Z — отменить, пробел — прослушать.</p></details>`;}
-  function helpSheet() {openSheet('Ритм всегда с вами',`<p>Создавайте табулатуры, слушайте и сохраняйте их в картинки. Работы хранятся на этом устройстве.</p><details open><summary>Добавить на главный экран</summary><p><b>iPhone:</b> откройте ссылку в Safari → «Поделиться» → «На экран Домой». Если есть переключатель «Открывать как веб-приложение», включите его.</p><p><b>Android:</b> в меню браузера выберите «Установить приложение» или «Добавить на главный экран».</p></details><details><summary>Работать без интернета</summary><p>При первом открытии нужен интернет. Дождитесь надписи «Готово без интернета» в библиотеке. После этого приложение и сохранённые табулатуры доступны автономно. Обновления загрузятся при следующем подключении.</p></details><details><summary>Сохранить и перенести музыку</summary><p>Изменения сохраняются автоматически. «Резервная копия» скачивает всю библиотеку. На другом устройстве выберите «Открыть файл». PNG — картинка, JSON — редактируемая табулатура.</p><p>Очистка данных сайта удаляет локальную библиотеку. Для важных работ сохраняйте резервную копию. Автоматической синхронизации между устройствами нет.</p></details>${recordingHelp()}<button class="button secondary full" data-action="backup">Сохранить резервную копию</button>`,'help');}
+  function helpSheet() {openSheet('Ритм всегда с вами',`<p>Создавайте табулатуры, слушайте и сохраняйте их в картинки. Работы хранятся на этом устройстве.</p><details open><summary>Добавить на главный экран</summary><p><b>iPhone:</b> откройте ссылку в Safari → «Поделиться» → «На экран Домой». Если есть переключатель «Открывать как веб-приложение», включите его.</p><p><b>Android:</b> в меню браузера выберите «Установить приложение» или «Добавить на главный экран».</p></details><details><summary>Работать без интернета</summary><p>При первом открытии нужен интернет. Дождитесь надписи «Готово без интернета» в библиотеке. После этого приложение и сохранённые табулатуры доступны автономно. Обновления загрузятся при следующем подключении.</p></details><details><summary>Сохранить и перенести музыку</summary><p>Изменения сохраняются автоматически. «Резервная копия» скачивает всю библиотеку. На другом устройстве выберите «Открыть файл». PNG — картинка, JSON — редактируемая табулатура.</p><p>Очистка данных сайта удаляет локальную библиотеку. Для важных работ сохраняйте резервную копию. Автоматической синхронизации между устройствами нет.</p></details>${recordingHelp()}${pwaHelp()}<button class="button secondary full" data-action="backup">Сохранить резервную копию</button>`,'help');}
   const actions={
     'new':newSheet, 'library':showLibrary, 'open-tab':b=>openTab(b.dataset.id), 'settings':settingsSheet,
     'select-measure':b=>selectMeasure(Number(b.dataset.index)), 'previous-measure':()=>selectMeasure(state.measure-1), 'next-measure':()=>selectMeasure(state.measure+1),
@@ -238,7 +245,7 @@
     'hand-colors':()=>commit(t=>{t.handColors=t.handColors===false;}),
     'marker':()=>{state.marker=!state.marker;renderScore();},
     'slot-tools':b=>{if(state.mode==='listen')return;state.slot=Number(b.dataset.slot);renderSelection();cellSheet();},
-    'split-cell':b=>editSlotRhythm(Number(b.dataset.parts)), 'merge-cell':()=>editSlotRhythm(),
+    'split-cell':b=>editSlotRhythm(Number(b.dataset.parts)), 'merge-cell':()=>editSlotRhythm(), 'custom-split':customSplitSheet,
     'cell-syllable':cellSheet, 'syllable-pattern':patternSheet,
     'reset-syllable':()=>{commit(t=>C.setSlotSyllable(t,state.measure,state.slot,''),'Автоматический слог восстановлен');closeSheet();},
     'default-pattern':()=>{const pattern=['Ta','Ka','Di','Mi','Ta','Ka','Jo','Nu'];pattern.forEach((value,i)=>{$('syllable-pattern-form').elements['syllable-'+i].value=value;});$('pattern-preview').textContent='TaKaDiMi TaKaJoNu';},
@@ -262,15 +269,17 @@
     'export-json':()=>download(jsonBlob(current()),safeName(current().title)+'.json'),
     'save-png':async button=>{const page=exportFiles[Number(button.dataset.page)];if(!page)return;button.disabled=true;try{await download(page.blob,page.name);}finally{button.disabled=false;}},
     'share-png':async button=>{button.disabled=true;try{if(isNative)await native.shareFiles(exportFiles,current().title);else await navigator.share({files:exportFiles.map(p=>new File([p.blob],p.name,{type:'image/png'})),title:current().title});}catch(error){if(error.name!=='AbortError')throw error;}finally{button.disabled=false;}},
-    'close-sheet':closeSheet,'help':isNative?nativeHelpSheet:helpSheet,'install':async()=>{if(installPrompt){await installPrompt.prompt();await installPrompt.userChoice;installPrompt=null;}else helpSheet();}
+    'close-sheet':closeSheet,'help':isNative?nativeHelpSheet:helpSheet,'install':installApp,'check-updates':()=>checkForUpdates(true),'apply-update':applyUpdate
   };
   function moveMeasure(step){const index=state.measure,next=index+step;if(next<0||next>=current().measures.length)return;commit(t=>{[t.measures[index],t.measures[next]]=[t.measures[next],t.measures[index]];});state.measure=next;renderEditor();closeSheet();}
-  document.addEventListener('click',async event=>{const button=event.target.closest('[data-action]');if(!button||button.disabled)return;try{if(button.dataset.action==='select-cell'&&!state.marker){const hand=event.target.closest('.cell-hand')?.dataset.hand;if(hand)state.row=hand;}await actions[button.dataset.action]?.(button);}catch(error){report(error);}});
+  document.addEventListener('click',async event=>{if(updateApplying)return;const button=event.target.closest('[data-action]');if(!button||button.disabled)return;const libraryMutation=['duplicate-tab','delete-tab'].includes(button.dataset.action);if(libraryMutation)pendingLibraryOps++;try{if(button.dataset.action==='select-cell'&&!state.marker){const hand=event.target.closest('.cell-hand')?.dataset.hand;if(hand)state.row=hand;}await actions[button.dataset.action]?.(button);}catch(error){report(error);}finally{if(libraryMutation)pendingLibraryOps--;}});
   document.addEventListener('submit',async event=>{
-    const form=event.target;if(!['new-form','settings-form','play-form','cell-syllable-form','syllable-pattern-form'].includes(form.id))return;event.preventDefault();
+    const form=event.target;if(!['new-form','settings-form','play-form','cell-syllable-form','syllable-pattern-form','split-form'].includes(form.id))return;event.preventDefault();if(updateApplying)return;
     const submit=form.querySelector('[type=submit]');submit.disabled=true;
+    const libraryMutation=form.id==='new-form';if(libraryMutation)pendingLibraryOps++;
     try{
       const data=new FormData(form);
+      if(form.id==='split-form'){const parts=Number(data.get('parts'));editSlotRhythm(parts);}
       if(form.id==='cell-syllable-form'){commit(t=>C.setSlotSyllable(t,state.measure,state.slot,String(data.get('syllable')).trim()),'Слог сохранён');closeSheet();}
       if(form.id==='syllable-pattern-form'){commit(t=>C.setKonnakolPattern(t,Array.from({length:8},(_,i)=>String(data.get('syllable-'+i)).trim())),'Слоги произведения обновлены');closeSheet();}
       if(form.id==='new-form'){const [numerator,denominator]=data.get('meter').split('/').map(Number);const tab=C.createTab({title:String(data.get('title')).trim()||'Новый ритм',meter:{numerator,denominator},hands:data.get('hands')});tab.measures=tab.measures.slice(0,1);if(state.storageReady)await S.saveTab(tab);state.tabs.unshift(tab);closeSheet();openTab(tab.id);S.requestPersistence().catch(()=>{});}
@@ -282,7 +291,7 @@
         commit(()=>tab);closeSheet();
       }
       if(form.id==='play-form'){const tempo=Number(data.get('tempo'));commit(t=>{t.tempo=tempo;});state.playMeasure=data.get('range')==='measure';state.loop=data.has('loop');state.metronome=data.has('metronome');player.stop();renderTransport();closeSheet();}
-    }catch(error){report(error);}finally{submit.disabled=false;}
+    }catch(error){report(error);}finally{submit.disabled=false;if(libraryMutation)pendingLibraryOps--;}
   });
   document.addEventListener('change',event=>{const el=event.target;try{
     if(el.id==='auto-advance')state.auto=el.checked;
@@ -292,7 +301,7 @@
   }catch(error){report(error);}});
   $('search').addEventListener('input',renderLibrary);
   document.addEventListener('input',event=>{if(event.target.closest('#syllable-pattern-form')){const pattern=Array.from({length:8},(_,i)=>$('syllable-pattern-form').elements['syllable-'+i].value);$('pattern-preview').textContent=pattern.slice(0,4).join('')+' '+pattern.slice(4).join('');}});
-  $('import-file').addEventListener('change',async event=>{try{await importFiles([...event.target.files]);}catch(error){report(error);}finally{event.target.value='';}});
+  $('import-file').addEventListener('change',async event=>{if(updateApplying)return;pendingLibraryOps++;try{await importFiles([...event.target.files]);}catch(error){report(error);}finally{event.target.value='';pendingLibraryOps--;}});
   $('sheet').addEventListener('click',event=>{if(event.target===$('sheet')){const rect=$('sheet').getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)closeSheet();}});
   $('sheet').addEventListener('close',()=>{if($('sheet').open)return;if(sheetType==='export')cleanExport();sheetType='';});
   document.addEventListener('visibilitychange',()=>{if(document.hidden)player.stop();});
@@ -300,8 +309,9 @@
   window.addEventListener('hang-native-back',event=>{if($('sheet').open){event.preventDefault();closeSheet();}else if(!$('editor-screen').hidden){event.preventDefault();showLibrary();}});
   window.addEventListener('hashchange',()=>{const id=location.hash.startsWith('#tab/')?location.hash.slice(5):null;if(id&&state.tabs.some(t=>t.id===id)){if(state.id!==id)openTab(id);else renderScreen(true);}else{player.stop();closeSheet();renderScreen(false);}});
   window.addEventListener('resize',()=>{updateDockSize();if(current()&&!$('editor-screen').hidden)renderScore();});
-  if(window.ResizeObserver)new ResizeObserver(updateDockSize).observe($('entry-dock'));
+  if(window.ResizeObserver){const observer=new ResizeObserver(updateDockSize);observer.observe($('entry-dock'));observer.observe($('app-update'));}
   document.addEventListener('keydown',event=>{
+    if(updateApplying)return;
     if($('editor-screen').hidden||$('sheet').open||/INPUT|TEXTAREA|SELECT/.test(event.target.tagName)||event.altKey)return;
     if((event.ctrlKey||event.metaKey)&&event.code==='KeyZ'){event.preventDefault();undo(event.shiftKey);return;}
     if((event.ctrlKey||event.metaKey)&&event.code==='KeyY'){event.preventDefault();undo(true);return;}
@@ -313,18 +323,62 @@
   $('note-pad').innerHTML=tokens.map(t=>`<button class="${['D','S','K','—'].includes(t)?'special':''}" data-action="note" data-token="${t}" aria-label="${({D:'Ding',S:'Slap',K:'Ka','—':'Пауза'})[t]||'Поле '+t}">${t}${['D','S','K','—'].includes(t)?`<small>${({D:'Ding',S:'Slap',K:'Ka','—':'пауза'})[t]}</small>`:''}</button>`).join('');
   let offlineReady=false;
   function connectivity(){ $('offline-status').textContent=isNative?'Полностью офлайн · на этом телефоне':offlineReady?(navigator.onLine?'Готово без интернета':'Работаем без интернета'):navigator.onLine?'На этом устройстве':'Нет сети · локальная библиотека'; }
-  window.addEventListener('online',connectivity);window.addEventListener('offline',connectivity);
-  window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installPrompt=event;$('install-tip').hidden=false;});
+  function standalone(){return installedApp||matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;}
+  function pwaHelp(){return isNative?'':`<details open><summary>Установка и обновления</summary><p>Новые версии проверяются при открытии и возвращении в приложение. Когда обновление загрузится, появится постоянная кнопка «Обновить». Последние изменения сохранятся перед перезапуском; удалять приложение и переустанавливать его не нужно.</p>${standalone()?'<p>Приложение уже открыто отдельно.</p>':'<button class="button secondary full" data-action="install">Установить мобильное приложение</button>'}<button class="button secondary full" data-action="check-updates">Проверить обновления</button><p id="pwa-check-status" class="sheet-help" role="status">${updateAvailable?'Новая версия готова. Закройте справку и нажмите «Обновить».':'Для проверки нужно подключение к интернету.'}</p></details>`;}
+  function renderInstall(){ $('install-tip').hidden=isNative||standalone(); }
+  function installSheet(){openSheet('Установить на телефон',`<p>Добавьте «Тихий ритм» на главный экран. Он будет открываться отдельным приложением и работать без интернета после первой загрузки.</p><details open><summary>iPhone и iPad</summary><p>Откройте эту страницу в <b>Safari</b> → <b>Поделиться</b> → <b>На экран «Домой»</b> → <b>Добавить</b>. Если есть переключатель «Открывать как веб-приложение», включите его.</p></details><details open><summary>Android</summary><p>В Chrome откройте меню <b>⋮</b> → <b>Установить приложение</b> или <b>Добавить на главный экран</b>. Если браузер предлагает установку, эта кнопка откроет его окно.</p></details><p class="sheet-help">Обновления приходят в уже установленное приложение: при появлении новой версии нажмите «Обновить». Удалять и устанавливать заново не нужно. Библиотека остаётся на устройстве.</p><button class="button primary full" data-action="close-sheet">Понятно</button>`,'install');}
+  async function installApp(){if(isNative)return;if(standalone()){toast('Приложение уже установлено');return;}const prompt=installPrompt;if(!prompt){installSheet();return;}installPrompt=null;await prompt.prompt();const choice=await prompt.userChoice;if(choice.outcome==='accepted')toast('Подтвердите установку в браузере');else toast('Можно установить позже через меню браузера');renderInstall();}
+  function updateNotice(message){const status=$('pwa-check-status');if(status)status.textContent=message;else toast(message);}
+  function renderUpdate(){if(isNative)return;updateAvailable=updateAvailable||!!pwaRegistration?.waiting;$('app-update').hidden=!updateAvailable;$('apply-update').disabled=updateApplying;$('apply-update').textContent=updateApplying?'Сохраняем…':'Обновить';updateDockSize();}
+  function checkpointUpdate(){const checkpoint={id:state.id,measure:state.measure,slot:state.slot,row:state.row,mode:state.mode,auto:state.auto,marker:state.marker,markerToken:state.markerToken,at:Date.now()};try{sessionStorage.setItem(updateCheckpointKey,JSON.stringify(checkpoint));}catch{try{window.history.replaceState({...window.history.state,hangUpdate:checkpoint},'');}catch{}}}
+  function restoreUpdateSelection(){let checkpoint;try{checkpoint=JSON.parse(sessionStorage.getItem(updateCheckpointKey)||'null');sessionStorage.removeItem(updateCheckpointKey);}catch{}if(!checkpoint)checkpoint=window.history.state?.hangUpdate;if(!checkpoint||checkpoint.id!==state.id||Date.now()-checkpoint.at>1800000||!current())return;state.measure=Number.isInteger(checkpoint.measure)?checkpoint.measure:0;state.slot=Number.isInteger(checkpoint.slot)?checkpoint.slot:0;state.row=['main','R','L'].includes(checkpoint.row)?checkpoint.row:'main';state.mode=checkpoint.mode==='listen'?'listen':'write';state.auto=checkpoint.auto!==false;state.marker=checkpoint.marker===true;state.markerToken=tokens.includes(checkpoint.markerToken)||checkpoint.markerToken==='-'?checkpoint.markerToken:'D';$('auto-advance').checked=state.auto;clampSelection();renderEditor();try{if(window.history.state?.hangUpdate){const next={...window.history.state};delete next.hangUpdate;window.history.replaceState(next,'');}}catch{}}
+  function reloadUpdatedApp(){clearTimeout(updateTimer);checkpointUpdate();location.reload();}
+  async function applyUpdate(){
+    if(isNative||updateApplying)return;
+    if(pendingLibraryOps){$('update-status').textContent='Дождитесь завершения операции с библиотекой, затем нажмите «Обновить».';return;}
+    if($('sheet').open&&!['help','install'].includes(sheetType)){report(Error('Сначала сохраните или закройте открытое редактирование. Затем обновите приложение.'));return;}
+    if(!pwaRegistration?.waiting&&!updateAvailable){await checkForUpdates(true);return;}
+    closeSheet();player.stop();updateApplying=true;$('app').inert=true;renderUpdate();$('update-status').textContent='Сохраняем последние изменения перед обновлением…';
+    try{
+      if(!state.storageReady)throw Error('Хранилище недоступно. Сохраните резервную копию и повторите обновление.');
+      const saves=[];
+      for(const [id,status] of state.saves){if(status.pending&&status.task)saves.push(status.task);else if(status.error){const tab=state.tabs.find(item=>item.id===id);if(tab)saves.push(persist(tab));}}
+      await Promise.all(saves);
+      if([...state.saves.values()].some(status=>status.pending||status.error))throw Error('Не все изменения сохранены. Повторите обновление после сохранения.');
+      checkpointUpdate();updateReloadRequested=true;
+      const worker=pwaRegistration?.waiting;
+      if(!worker){reloadUpdatedApp();return;}
+      $('update-status').textContent='Изменения сохранены. Открываем новую версию…';$('apply-update').textContent='Обновляем…';
+      worker.postMessage({type:'SKIP_WAITING'});
+      updateTimer=setTimeout(()=>{if(!updateReloadRequested)return;updateReloadRequested=false;updateApplying=false;$('app').inert=false;$('update-status').textContent='Обновление ещё не активировалось. Можно повторить попытку.';renderUpdate();},15000);
+    }catch(error){updateApplying=false;updateReloadRequested=false;$('app').inert=false;$('update-status').textContent='Обновление не применено: '+(error?.message||'не удалось сохранить изменения.');renderUpdate();}
+  }
+  async function checkForUpdates(explicit=false){
+    if(isNative)return;
+    if(!navigator.onLine){if(explicit)updateNotice('Нет интернета. Библиотека доступна; проверим обновления после подключения.');return;}
+    if(!pwaRegistration){if(explicit)updateNotice('Обновления доступны при открытии приложения по HTTPS. Если страница только загрузилась, повторите через несколько секунд.');return;}
+    if(updateCheckPromise)return updateCheckPromise;
+    if(!explicit&&Date.now()-lastUpdateCheck<60000)return;
+    lastUpdateCheck=Date.now();if(explicit)updateNotice('Проверяем обновления…');
+    updateCheckPromise=(async()=>{try{await pwaRegistration.update();renderUpdate();if(explicit)updateNotice(pwaRegistration.waiting||updateAvailable?'Новая версия готова. Нажмите «Обновить», когда закончите редактирование.':pwaRegistration.installing?'Загружаем новую версию. Кнопка обновления появится, когда она будет готова.':'Проверка завершена. Новых обновлений сейчас нет.');}catch{if(explicit)updateNotice('Не удалось проверить обновления. Проверьте подключение и повторите.');}finally{updateCheckPromise=null;}})();return updateCheckPromise;
+  }
+  window.addEventListener('online',()=>{connectivity();checkForUpdates();});window.addEventListener('offline',connectivity);
+  window.addEventListener('focus',()=>checkForUpdates());
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdates();});
+  window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installPrompt=event;renderInstall();});
+  window.addEventListener('appinstalled',()=>{installedApp=true;installPrompt=null;renderInstall();toast('Приложение установлено. Открывайте его с главного экрана.');});
   async function setupPWA(){
-    if(isNative){$('install-tip').hidden=true;connectivity();return;}
-    $('install-tip').hidden=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+    renderInstall();
+    if(isNative){$('app-update').hidden=true;connectivity();return;}
     if(!('serviceWorker' in navigator)||!window.isSecureContext){connectivity();return;}
-    try{const reg=await navigator.serviceWorker.register('./sw.js');await navigator.serviceWorker.ready;offlineReady=true;connectivity();if(reg.waiting)toast('Обновление готово. Закройте все окна приложения и откройте снова.');reg.addEventListener('updatefound',()=>{const worker=reg.installing;worker?.addEventListener('statechange',()=>{if(worker.state==='installed'&&navigator.serviceWorker.controller)toast('Есть обновление. Оно применится после закрытия всех окон приложения.');});});}catch{connectivity();}
+    let controlled=!!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange',()=>{const wasControlled=controlled;controlled=!!navigator.serviceWorker.controller;offlineReady=controlled;connectivity();if(updateReloadRequested){reloadUpdatedApp();return;}if(wasControlled){updateAvailable=true;$('update-status').textContent='Новая версия готова. Сохраните открытое редактирование и нажмите «Обновить».';renderUpdate();}});
+    try{pwaRegistration=await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});const watch=worker=>{worker?.addEventListener('statechange',()=>{if(worker.state==='installed'){setTimeout(()=>{renderUpdate();if(pwaRegistration.waiting)updateNotice('Новая версия готова к обновлению.');},0);}});};watch(pwaRegistration.installing);pwaRegistration.addEventListener('updatefound',()=>watch(pwaRegistration.installing));renderUpdate();await navigator.serviceWorker.ready;offlineReady=true;connectivity();checkForUpdates();}catch{connectivity();}
   }
   const ready=(async()=>{
     try{const saved=await S.initialize(HangSamples);state.tabs=saved.tabs;state.storageReady=true;}
     catch(error){$('storage-error').hidden=false;$('storage-error').textContent='Хранилище недоступно. Существующие данные не изменены. Новые работы будут только в памяти — сохраняйте JSON перед закрытием. '+error.message;}
-    renderLibrary();const id=location.hash.startsWith('#tab/')?location.hash.slice(5):null;if(id&&state.tabs.some(t=>t.id===id))openTab(id);setupPWA();
+    renderLibrary();const id=location.hash.startsWith('#tab/')?location.hash.slice(5):null;if(id&&state.tabs.some(t=>t.id===id)){openTab(id);restoreUpdateSelection();}setupPWA();
   })();
   window.HangMobile={ready,getCurrent:()=>current()?C.clone(current()):null,getLibrary:()=>C.clone(state.tabs)};
 })();

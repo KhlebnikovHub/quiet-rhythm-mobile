@@ -1,7 +1,7 @@
 import { mkdir, readFile, realpath, rename, stat, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 
 const root = await realpath(fileURLToPath(new URL('../', import.meta.url)));
 const destination = path.join(root, 'dist');
@@ -17,6 +17,18 @@ const sources = await Promise.all(files.map(async name => {
   if (!source.startsWith(root + path.sep) || !(await stat(source)).isFile()) throw new Error('Некорректный исходный файл: ' + name);
   return { name, content: await readFile(source) };
 }));
+// Identical contents produce the same release, and any changed asset produces
+// a new worker/cache. Normalize text so Windows and GitHub builds agree.
+const fingerprint = createHash('sha256');
+for (const source of sources) {
+  if (!source.name.endsWith('.png')) source.content = Buffer.from(source.content.toString('utf8').replace(/\r\n/g, '\n'));
+  fingerprint.update(source.name + '\0').update(source.content).update('\0');
+}
+const version = 'release-' + fingerprint.digest('hex').slice(0, 20);
+const worker = sources.find(source => source.name === 'sw.js');
+const marker = "const APP_VERSION = 'dev-v5';";
+if (!worker.content.toString('utf8').includes(marker)) throw new Error('Не найден маркер версии Service Worker.');
+worker.content = Buffer.from(worker.content.toString('utf8').replace(marker, `const APP_VERSION = '${version}';`));
 await mkdir(destination, { recursive: true });
 if (await realpath(destination) !== destination) throw new Error('Папка dist не должна быть ссылкой на другой каталог.');
 
@@ -36,4 +48,5 @@ for (const { name, content } of sources) {
   }
 }
 console.log(`Готово: ${files.length} файлов в ${destination}`);
+console.log('Версия приложения: ' + version);
 console.log('Публикуйте содержимое dist на статическом HTTPS-хостинге. Личная библиотека в сборку не входит.');

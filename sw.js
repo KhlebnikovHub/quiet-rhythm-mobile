@@ -1,9 +1,10 @@
 'use strict';
 
-// Bump the version whenever any app-shell asset changes. A new version waits
-// until every old app window closes, keeping open editors on a consistent build.
+// The web build replaces this development marker with a hash of every asset.
+// New releases wait for the editor to finish saving before SKIP_WAITING.
+const APP_VERSION = 'dev-v5';
 const CACHE_PREFIX = 'quiet-rhythm-mobile:' + self.registration.scope + ':';
-const CACHE_NAME = CACHE_PREFIX + 'v4';
+const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const FILES = [
   './', './index.html', './styles.css', './app.js', './core.js',
   './sample-tabs.js', './playback.js', './export.js', './storage.js',
@@ -13,9 +14,25 @@ const FILES = [
 const ASSETS = new Set(FILES.map(path => new URL(path, self.registration.scope).href));
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(
-    FILES.map(path => new Request(new URL(path, self.registration.scope), { cache: 'reload' }))
-  )));
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    await cache.addAll(FILES.map(path => new Request(new URL(path, self.registration.scope), { cache: 'reload' })));
+    // v1-v4 cannot request activation. Migrate their cache once without forcing
+    // open editors to navigate: the next normal refresh serves the new app.
+    const names = await caches.keys();
+    if (names.some(name => name.startsWith(CACHE_PREFIX) && /^v[1-4]$/.test(name.slice(CACHE_PREFIX.length)))) {
+      await self.skipWaiting();
+    }
+  })());
+});
+
+self.addEventListener('message', event => {
+  if (event.data?.type !== 'SKIP_WAITING' || !event.source?.url) return;
+  const source = new URL(event.source.url);
+  const scope = new URL(self.registration.scope);
+  if (source.origin === scope.origin && source.pathname.startsWith(scope.pathname)) {
+    event.waitUntil(self.skipWaiting());
+  }
 });
 
 self.addEventListener('activate', event => {
