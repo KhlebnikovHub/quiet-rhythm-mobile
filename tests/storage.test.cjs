@@ -162,7 +162,7 @@ test('mobile library in real Chromium IndexedDB', { timeout: 60000 }, async t =>
     }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const child = spawn(browser, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--user-data-dir=' + profile, 'http://127.0.0.1:' + server.address().port], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawn(browser, ['--headless=new', '--disable-gpu', '--in-process-gpu', ...(process.env.BROWSER_NO_SANDBOX === '1' ? ['--no-sandbox'] : []), '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--user-data-dir=' + profile, 'http://127.0.0.1:' + server.address().port], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
   let diagnostics = '';
   child.stderr.on('data', chunk => { diagnostics = (diagnostics + chunk).slice(-4000); });
   let timeout;

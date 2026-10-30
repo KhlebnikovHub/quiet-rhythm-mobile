@@ -35,7 +35,7 @@ def main():
         port = sock.getsockname()[1]
     with tempfile.TemporaryDirectory(prefix='hang-mobile-') as profile:
         log = (ARTIFACTS / 'browser.log').open('w', encoding='utf-8')
-        process = subprocess.Popen([str(BROWSER), '--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--remote-allow-origins=*', f'--remote-debugging-port={port}', f'--user-data-dir={profile}', 'about:blank'], stdout=log, stderr=log, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        process = subprocess.Popen([str(BROWSER), '--headless', '--disable-gpu', '--in-process-gpu', *(['--no-sandbox'] if os.environ.get('BROWSER_NO_SANDBOX') == '1' else []), '--no-first-run', '--no-default-browser-check', '--remote-allow-origins=*', f'--remote-debugging-port={port}', f'--user-data-dir={profile}', 'about:blank'], stdout=log, stderr=log, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         client = None
         try:
             client = CDP(wait_debugger(port, process))
@@ -81,7 +81,8 @@ def main():
             client.fill('#settings-form [name=notation]', 'hybrid', 'change')
             client.fill('#settings-form [name=tempo]', '96', 'change')
             client.click('#settings-form [type=submit]')
-            client.click('.note-cell[data-slot="0"][data-row=L]')
+            client.click('[data-action=input-hand][data-hand=L]')
+            client.click('.note-cell[data-slot="0"]')
             client.click('#note-pad [data-token="8"]')
             check(client.evaluate('HangMobile.getCurrent().measures[1].rows.L[0][0] === "8" && HangMobile.getCurrent().measures[1].rows.R[0][0] === "D"'), 'independent hands preserve previous notes')
             client.wait('document.getElementById("save-status").textContent === "Сохранено на устройстве"', 'autosave')

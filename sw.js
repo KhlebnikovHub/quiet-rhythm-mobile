@@ -3,7 +3,7 @@
 // Bump the version whenever any app-shell asset changes. A new version waits
 // until every old app window closes, keeping open editors on a consistent build.
 const CACHE_PREFIX = 'quiet-rhythm-mobile:' + self.registration.scope + ':';
-const CACHE_NAME = CACHE_PREFIX + 'v2';
+const CACHE_NAME = CACHE_PREFIX + 'v4';
 const FILES = [
   './', './index.html', './styles.css', './app.js', './core.js',
   './sample-tabs.js', './playback.js', './export.js', './storage.js',

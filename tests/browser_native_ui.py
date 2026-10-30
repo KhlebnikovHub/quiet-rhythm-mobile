@@ -25,7 +25,7 @@ def main():
         sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
     with tempfile.TemporaryDirectory(prefix='hang-native-ui-') as profile:
         with (ARTIFACTS / 'native-ui-browser.log').open('w') as log:
-            process = subprocess.Popen([str(BROWSER), '--headless', '--disable-gpu', '--no-first-run', '--disable-background-networking', '--remote-allow-origins=*', f'--remote-debugging-port={port}', f'--user-data-dir={profile}', 'about:blank'], stdout=log, stderr=log, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            process = subprocess.Popen([str(BROWSER), '--headless', '--disable-gpu', '--in-process-gpu', *(['--no-sandbox'] if os.environ.get('BROWSER_NO_SANDBOX') == '1' else []), '--no-first-run', '--disable-background-networking', '--remote-allow-origins=*', f'--remote-debugging-port={port}', f'--user-data-dir={profile}', 'about:blank'], stdout=log, stderr=log, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             client = None
             try:
                 client = CDP(wait_debugger(port, process))
