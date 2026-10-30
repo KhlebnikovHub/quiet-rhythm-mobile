@@ -5,7 +5,8 @@
   // A page stays below 3.4 megapixels, including the footer. Only one canvas is
   // alive at a time; callers can consume renderPages() without retaining PNGs.
   const WIDTH = 1400, MAX_HEIGHT = 2400, MARGIN = 64, FOOTER = 96;
-  const CONTENT = WIDTH - MARGIN * 2, HAND_WIDTH = 54;
+  const CONTENT = WIDTH - MARGIN * 2;
+  const HAND_COLORS = { R: '#2463b4', L: '#c43d4d' };
   const FONT = '"Segoe UI", Arial, sans-serif';
   const safeName = title => (title || 'табулатура').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').slice(0, 100).trim().replace(/[. ]+$/g, '') || 'табулатура';
 
@@ -38,9 +39,14 @@
   }
 
   function chordSize(cell) { return cell.length > 4 ? 22 : 28; }
+  function namedHand(row) { return row.label === 'R' || row.label === 'L'; }
   function chordHeight(rows) {
     let height = 96;
-    for (const row of rows) for (const cell of row.cells) height = Math.max(height, cell.length * (chordSize(cell) + 7) + 20);
+    for (let i = 0; i < rows[0].cells.length; i++) {
+      const occupied = rows.filter(row => row.cells[i].length);
+      const content = occupied.reduce((sum, row) => sum + row.cells[i].length * (chordSize(row.cells[i]) + 7), 0);
+      height = Math.max(height, content + Math.max(0, occupied.length - 1) * 12 + 24);
+    }
     return height;
   }
 
@@ -50,7 +56,7 @@
     let scale = 0;
     const minimums = slots.map((slot, i) => {
       let width = Math.max(52, measured(ctx, slot.displayLabel, 20, '600') + 20);
-      for (const row of rows) for (const note of row.cells[i]) width = Math.max(width, measured(ctx, note, chordSize(row.cells[i]), '500') + 20);
+      for (const row of rows) for (const note of row.cells[i]) width = Math.max(width, measured(ctx, note, chordSize(row.cells[i]), '500') + (namedHand(row) ? 52 : 20));
       if (beats) width = Math.max(width, measured(ctx, beats[slot.beat].label, 20, '600') + 46);
       scale = Math.max(scale, width / slot.duration);
       return width;
@@ -65,13 +71,13 @@
         used += width; end++;
       }
       const chunkSlots = slots.slice(start, end);
-      const chunkRows = rows.map(row => ({ label: row.label, cells: row.cells.slice(start, end) }));
+      const chunkRows = rows.map(row => ({ ...row, cells: row.cells.slice(start, end) }));
       const groups = beats ? [] : null;
       if (groups) chunkSlots.forEach((slot, index) => {
         let group = groups[groups.length - 1];
         if (!group || group.beat !== slot.beat) {
           const beat = beats[slot.beat];
-          group = { beat: slot.beat, start: index, count: 0, label: beat.label, divided: beat.division > 1, before: slot.sub > 0, after: false };
+          group = { beat: slot.beat, start: index, count: 0, label: beat.label, divided: beat.division > 1 || slot.displayLabel !== slot.label, before: slot.sub > 0, after: false };
           groups.push(group);
         }
         group.count++;
@@ -83,19 +89,17 @@
     return chunks;
   }
 
-  function drawGrid(ctx, y, item, withHands) {
+  function drawGrid(ctx, y, item) {
     const { slots, rows, groups, rowHeight } = item;
-    const gridX = MARGIN + (withHands ? HAND_WIDTH : 0), width = CONTENT - (withHands ? HAND_WIDTH : 0);
+    const gridX = MARGIN, width = CONTENT;
     const groupHeight = groups ? 28 : 0, headerHeight = 44 + groupHeight;
     const total = slots.reduce((sum, slot) => sum + slot.duration, 0);
     const boundaries = [gridX];
     for (const slot of slots) boundaries.push(boundaries[boundaries.length - 1] + slot.duration / total * width);
     ctx.fillStyle = '#f0f3e9'; ctx.fillRect(gridX, y, width, headerHeight);
     ctx.strokeStyle = GRID; ctx.lineWidth = 1;
-    ctx.strokeRect(gridX, y, width, headerHeight + rowHeight * rows.length);
-    for (let r = 0; r <= rows.length; r++) {
-      ctx.beginPath(); ctx.moveTo(gridX, y + headerHeight + rowHeight * r); ctx.lineTo(gridX + width, y + headerHeight + rowHeight * r); ctx.stroke();
-    }
+    ctx.strokeRect(gridX, y, width, headerHeight + rowHeight);
+    ctx.beginPath(); ctx.moveTo(gridX, y + headerHeight); ctx.lineTo(gridX + width, y + headerHeight); ctx.stroke();
     const groupStarts = new Set(), dividedSlots = new Set();
     if (groups) for (const group of groups) {
       const end = group.start + group.count, left = boundaries[group.start], right = boundaries[end];
@@ -109,20 +113,24 @@
     }
     slots.forEach((slot, i) => {
       ctx.strokeStyle = slot.groupStart ? '#b6c4a3' : GRID; ctx.lineWidth = slot.groupStart ? 1.6 : 1;
-      ctx.beginPath(); ctx.moveTo(boundaries[i], groups && !groupStarts.has(i) ? y + groupHeight : y); ctx.lineTo(boundaries[i], y + headerHeight + rowHeight * rows.length); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(boundaries[i], groups && !groupStarts.has(i) ? y + groupHeight : y); ctx.lineTo(boundaries[i], y + headerHeight + rowHeight); ctx.stroke();
       const cx = (boundaries[i] + boundaries[i + 1]) / 2;
       if (!groups || dividedSlots.has(i)) text(ctx, slot.displayLabel, cx, y + groupHeight + 23, 20, '#668256', 'center', '600');
-      rows.forEach((row, r) => {
-        const cell = row.cells[i], cy = y + headerHeight + rowHeight * (r + .5);
-        if (!cell.length) text(ctx, '—', cx, cy, 23, '#bdc6af', 'center');
-        else cell.forEach((note, n) => {
-          const size = chordSize(cell), lineHeight = size + 7, py = cy + (n - (cell.length - 1) / 2) * lineHeight;
-          text(ctx, note, cx, py, size, INK, 'center', '500');
-          if (n < cell.length - 1) { ctx.strokeStyle = INK; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(cx - 13, py + lineHeight / 2); ctx.lineTo(cx + 13, py + lineHeight / 2); ctx.stroke(); }
+      const occupied = rows.filter(row => row.cells[i].length), cy = y + headerHeight + rowHeight / 2;
+      const contentHeight = occupied.reduce((sum, row) => sum + row.cells[i].length * (chordSize(row.cells[i]) + 7), 0) + Math.max(0, occupied.length - 1) * 12;
+      let top = cy - contentHeight / 2;
+      if (!occupied.length) text(ctx, '—', cx, cy, 23, '#bdc6af', 'center');
+      occupied.forEach(row => {
+        const cell = row.cells[i], size = chordSize(cell), lineHeight = size + 7, noteX = cx + (namedHand(row) ? 8 : 0);
+        cell.forEach((note, n) => {
+          const py = top + lineHeight * (n + .5);
+          text(ctx, note, noteX, py, size, row.color || INK, 'center', '500');
+          if (namedHand(row) && n === 0) text(ctx, row.label, boundaries[i] + 12, py, 12, row.color || INK, 'center', '600');
+          if (n < cell.length - 1) { ctx.strokeStyle = row.color || INK; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(noteX - 13, py + lineHeight / 2); ctx.lineTo(noteX + 13, py + lineHeight / 2); ctx.stroke(); }
         });
+        top += cell.length * lineHeight + 12;
       });
     });
-    if (withHands) rows.forEach((row, r) => text(ctx, row.label, MARGIN + HAND_WIDTH / 2, y + headerHeight + rowHeight * (r + .5), 18, MUTED, 'center', '600'));
   }
 
   function layout(ctx, tab, options) {
@@ -130,11 +138,13 @@
     // title cannot consume an entire image with empty lines.
     const titleLines = wrap(ctx, (tab.title || 'Без названия').replace(/\s+/g, ' ').trim(), CONTENT, 46);
     const subtitleLines = tab.subtitle ? wrap(ctx, tab.subtitle.replace(/\s+/g, ' ').trim(), CONTENT, 22) : [];
-    const meta = `${tab.meter.numerator}/${tab.meter.denominator}   ·   ♩ = ${tab.tempo} BPM   ·   ${{ count: 'Обычный счёт', konnakol: 'Коннакол', hybrid: 'Гибрид' }[tab.notation]}   ·   ${tab.hands === 'split' ? 'Правая / левая' : 'Одна партия'}`;
+    const handModes = new Set(tab.measures.flatMap((measure, index) => measure.rows.main.map((_, slot) => C.cellHands(tab, index, slot))));
+    const handsLabel = handModes.size > 1 ? 'Обычные ячейки и R/L' : handModes.has('split') ? 'Правая / левая' : 'Одна партия';
+    const meta = `${tab.meter.numerator}/${tab.meter.denominator}   ·   ♩ = ${tab.tempo} BPM   ·   ${{ count: 'Обычный счёт', konnakol: 'Коннакол', hybrid: 'Гибрид' }[tab.notation]}   ·   ${handsLabel}`;
     const metaLines = wrap(ctx, meta, CONTENT, 19);
     const headerHeight = 64 + titleLines.length * 54 + subtitleLines.length * 30 + metaLines.length * 27 + 36;
     const itemLimit = MAX_HEIGHT - headerHeight - FOOTER;
-    const pages = [], rowKeys = tab.hands === 'split' ? ['R', 'L'] : ['main'];
+    const pages = [], rowKeys = ['main', 'R', 'L'];
     let page = [], used = 0;
     function add(item) {
       if (item.height > itemLimit) throw new Error('Заголовок или такт слишком длинный для страницы PNG. Сократите текст заголовка.');
@@ -148,13 +158,13 @@
     }
     for (const index of indices) {
       const measure = tab.measures[index], slots = C.slots(tab, index);
-      const rows = rowKeys.map(row => ({ label: row, cells: measure.rows[row] }));
-      const chunks = splitGrid(ctx, slots, rows, CONTENT - (rowKeys.length === 2 ? HAND_WIDTH : 0), tab.notation === 'hybrid' ? C.measureBeats(tab, index) : null);
+      const rows = rowKeys.map(row => ({ label: row, cells: measure.rows[row].map((cell, slot) => C.cellRows(tab, index, slot).includes(row) ? cell : []), color: tab.handColors === false ? INK : HAND_COLORS[row] || INK }));
+      const chunks = splitGrid(ctx, slots, rows, CONTENT, tab.notation === 'hybrid' ? C.measureBeats(tab, index) : null);
       chunks.forEach((chunk, part) => {
         const heading = `Такт ${index + 1}${chunks.length > 1 ? ` · часть ${part + 1}/${chunks.length} · позиции ${chunk.start + 1}–${chunk.end}` : ''}`;
         const labelLines = measure.label ? wrap(ctx, measure.label.replace(/\s+/g, ' ').trim(), CONTENT, 19) : [];
         const labelHeight = 36 + labelLines.length * 25;
-        add({ ...chunk, heading, labelLines, labelHeight, withHands: rowKeys.length === 2, height: labelHeight + (chunk.groups ? 72 : 44) + chunk.rowHeight * rows.length + 32 });
+        add({ ...chunk, heading, labelLines, labelHeight, height: labelHeight + (chunk.groups ? 72 : 44) + chunk.rowHeight + 32 });
       });
     }
     // A phrase example is independent of the selected measure; include it only
@@ -163,7 +173,7 @@
       const example = tab.phraseExample;
       const slots = example.labels.map((label, index) => ({ duration: 1, displayLabel: label, groupStart: index === 0 }));
       const chunks = splitGrid(ctx, slots, [{ cells: example.notes }], CONTENT, null);
-      chunks.forEach((chunk, part) => add({ ...chunk, heading: `Фразировка из оригинала · отдельный пример${chunks.length > 1 ? ` · ${part + 1}/${chunks.length}` : ''}`, labelLines: [], labelHeight: 40, withHands: false, height: 40 + 44 + chunk.rowHeight + 32 }));
+      chunks.forEach((chunk, part) => add({ ...chunk, heading: `Фразировка из оригинала · отдельный пример${chunks.length > 1 ? ` · ${part + 1}/${chunks.length}` : ''}`, labelLines: [], labelHeight: 40, height: 40 + 44 + chunk.rowHeight + 32 }));
     }
     const noteLines = tab.notes ? wrap(ctx, tab.notes, CONTENT, 20) : [];
     const batch = Math.max(1, Math.floor((itemLimit - 76) / 28));
@@ -204,7 +214,7 @@
           if (item.noteLines) item.noteLines.forEach((line, i) => text(ctx, line, MARGIN, y + 53 + i * 28, 20, MUTED));
           else {
             item.labelLines.forEach((line, i) => text(ctx, line, MARGIN, y + 43 + i * 25, 19, MUTED));
-            drawGrid(ctx, y + item.labelHeight, item, item.withHands);
+            drawGrid(ctx, y + item.labelHeight, item);
           }
           y += item.height;
         }
